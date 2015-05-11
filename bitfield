@@ -10,359 +10,370 @@ import os
 import sys
 import pprint
 from pyparsing import Literal, Word, ZeroOrMore, Group, Dict, Optional, \
-        printables, ParseException, restOfLine
+    printables, ParseException, restOfLine
 from getopt import getopt, GetoptError
 
 # List of paths to look for configuration files. If a directory is specified,
 # it will be (recursively) scanned for .conf files.
 configs = ["/etc/bitfield.d", "/etc/bitfield",
-		os.path.join(os.getenv("HOME"), ".bitfield.d"),
-		os.path.join(os.getenv("HOME"), ".bitfield.conf")]
+           os.path.join(os.getenv("HOME"), ".bitfield.d"),
+           os.path.join(os.getenv("HOME"), ".bitfield.conf")]
+
 
 class bitfield:
-	def __init__(self, bits, name):
-		self.bits = bits
-		self.name = name
-		self.values = {}
 
-	def width(self):
-		return len(self.bits)
+    def __init__(self, bits, name):
+        self.bits = bits
+        self.name = name
+        self.values = {}
 
-	def add_value(self, value, description):
-		self.values[int(value, 0)] = description
+    def width(self):
+        return len(self.bits)
 
-	def mask(self, reg, value):
-		ret = 0
-		out_len = len(self.bits)
+    def add_value(self, value, description):
+        self.values[int(value, 0)] = description
 
-		if reg.bit_order == reg.bit_0_is_msb:
-			bit_pairs = zip(self.bits, range(0, out_len))
-		else:
-			bit_pairs = zip(self.bits, range(out_len - 1, -1, -1))
+    def mask(self, reg, value):
+        ret = 0
+        out_len = len(self.bits)
 
-		for (in_bit, out_bit) in bit_pairs:
-			# shift this bit down to the LSB (and mask the rest)
-			i = (value >> (reg.width - in_bit - 1)) & 1
-			# shift back to the output position in the field
-			i <<= out_len - out_bit - 1
-			ret |= i
-		return ret
+        if reg.bit_order == reg.bit_0_is_msb:
+            bit_pairs = zip(self.bits, range(0, out_len))
+        else:
+            bit_pairs = zip(self.bits, range(out_len - 1, -1, -1))
 
-	def value(self, value):
-		if value in self.values:
-			return self.values[value]
-		return None
+        for (in_bit, out_bit) in bit_pairs:
+            # shift this bit down to the LSB (and mask the rest)
+            i = (value >> (reg.width - in_bit - 1)) & 1
+            # shift back to the output position in the field
+            i <<= out_len - out_bit - 1
+            ret |= i
+        return ret
 
-	@staticmethod
-	def mask_and_shift_to_bits(width, mask, shift):
-		bits = []
-		val = mask << shift
-		for i in range(0, width):
-			if mask & (1 << i):
-				bits.insert(0, width - i - 1 - shift)
-		return bits
+    def value(self, value):
+        if value in self.values:
+            return self.values[value]
+        return None
 
-	@staticmethod
-	def mask_to_bits(width, mask):
-		return bitfield.mask_and_shift_to_bits(width, mask, 0)
+    @staticmethod
+    def mask_and_shift_to_bits(width, mask, shift):
+        bits = []
+        val = mask << shift
+        for i in range(0, width):
+            if mask & (1 << i):
+                bits.insert(0, width - i - 1 - shift)
+        return bits
 
-	@staticmethod
-	def parse_bitfield(line, reg):
-		a = line.split(None, 1)
-		if len(a) != 2:
-			return None
-		(range_str, name) = a
+    @staticmethod
+    def mask_to_bits(width, mask):
+        return bitfield.mask_and_shift_to_bits(width, mask, 0)
 
-		bits = []
-		for s in range_str.split(','):
-			if ':' in s:
-				(start, end) = [reg.bit_number(int(s)) for s in s.split(':')]
-				bits.extend(range(start, end - 1, -1))
-			elif '<<' in s:
-				(mask, shift) = [int(s.strip()) for s in s.split('<<')]
-				bits.extend(bitfield.mask_and_shift_to_bits( \
-					reg.width, mask, shift))
-			elif s.startswith('&'):
-				mask = int(s[1:], 0)
-				bits.extend(bitfield.mask_to_bits(reg.width, \
-							mask))
-			else:
-				bits.append(reg.bit_number(int(s)))
+    @staticmethod
+    def parse_bitfield(line, reg):
+        a = line.split(None, 1)
+        if len(a) != 2:
+            return None
+        (range_str, name) = a
 
-		return bitfield(bits, name)
+        bits = []
+        for s in range_str.split(','):
+            if ':' in s:
+                (start, end) = [reg.bit_number(int(s)) for s in s.split(':')]
+                bits.extend(range(start, end - 1, -1))
+            elif '<<' in s:
+                (mask, shift) = [int(s.strip()) for s in s.split('<<')]
+                bits.extend(bitfield.mask_and_shift_to_bits(
+                    reg.width, mask, shift))
+            elif s.startswith('&'):
+                mask = int(s[1:], 0)
+                bits.extend(bitfield.mask_to_bits(reg.width,
+                                                  mask))
+            else:
+                bits.append(reg.bit_number(int(s)))
 
+        return bitfield(bits, name)
 
+    @staticmethod
+    def parse_value(line):
+        a = line.split(None, 1)
+        if len(a) != 2:
+            return None
+        return a
 
-	@staticmethod
-	def parse_value(line):
-		a = line.split(None, 1)
-		if len(a) != 2:
-			return None
-		return a
 
 class register:
-	bit_0_is_msb = 0
-	bit_0_is_lsb = 1
+    bit_0_is_msb = 0
+    bit_0_is_lsb = 1
 
-	def __init__(self, id):
-		self.id = id
-		self.fields = []
-		# set defaults
-		self.name = None
-		self.bit_order = self.bit_0_is_msb
-		self.width = 64
+    def __init__(self, id):
+        self.id = id
+        self.fields = []
+        # set defaults
+        self.name = None
+        self.bit_order = self.bit_0_is_msb
+        self.width = 64
 
-	def add_field(self, field):
-		self.fields.append(field)
+    def add_field(self, field):
+        self.fields.append(field)
 
-	def decode(self, value, ignore_zero):
-		field_width = (self.width + 3) // 4
-		name_width = max([len(f.name) for f in self.fields])
+    def decode(self, value, ignore_zero):
+        field_width = (self.width + 3) // 4
+        name_width = max([len(f.name) for f in self.fields])
 
-		str = "0x%0*lx [%d]\n" % (field_width, value, value)
+        str = "0x%0*lx [%d]\n" % (field_width, value, value)
 
-		for field in self.fields:
-			v = field.mask(self, value);
-			if ignore_zero and v == 0:
-				continue
-			desc = field.value(v)
-			if desc is not None:
-				str += "%*s: 0x%x [%s]\n" \
-					% (name_width, field.name, v, desc)
-			else:
-				str += "%*s: 0x%x\n" \
-					% (name_width, field.name, v)
-		return str
+        for field in self.fields:
+            v = field.mask(self, value)
+            if ignore_zero and v == 0:
+                continue
+            desc = field.value(v)
+            if desc is not None:
+                str += "%*s: 0x%x [%s]\n" \
+                    % (name_width, field.name, v, desc)
+            else:
+                str += "%*s: 0x%x\n" \
+                    % (name_width, field.name, v)
+        return str
 
-	def bit_number(self, number):
-		if self.bit_order == self.bit_0_is_lsb:
-			number = self.width - number - 1
-		return number
+    def bit_number(self, number):
+        if self.bit_order == self.bit_0_is_lsb:
+            number = self.width - number - 1
+        return number
+
 
 def list_regs(regs):
-	for (id, r) in regs.items():
-		print("%18s : %s" % (id, r.name))
+    for (id, r) in regs.items():
+        print("%18s : %s" % (id, r.name))
+
 
 def search_regs(regs, str):
-	return dict((k, regs[k]) for k in regs \
-			if str.lower() in regs[k].name.lower() + k.lower())
+    return dict((k, regs[k]) for k in regs
+                if str.lower() in regs[k].name.lower() + k.lower())
+
 
 class ConfigurationError(Exception):
-	def __init__(self, file, message):
-		self.file = file
-		self.message = message
+
+    def __init__(self, file, message):
+        self.file = file
+        self.message = message
+
 
 def parse_config(bnf, regs, file):
-	f = open(file)
+    f = open(file)
 
-	tokens = bnf.parseString(f.read())
+    tokens = bnf.parseString(f.read())
 
-	order_map = {'bit-0-is-lsb':	register.bit_0_is_lsb,
-			'bit-0-is-msb':	register.bit_0_is_msb,
-			'ibm':		register.bit_0_is_msb,
-			'default':	register.bit_0_is_msb}
+    order_map = {'bit-0-is-lsb':	register.bit_0_is_lsb,
+                 'bit-0-is-msb':	register.bit_0_is_msb,
+                 'ibm':		register.bit_0_is_msb,
+                 'default':	register.bit_0_is_msb}
 
-	for tok in tokens:
-		ts = tok.asList()
-		id = ts.pop(0)
+    for tok in tokens:
+        ts = tok.asList()
+        id = ts.pop(0)
 
-		if id in regs:
-			raise ConfigurationError(file,
-				"Register %s is already defined" % id)
+        if id in regs:
+            raise ConfigurationError(file,
+                                     "Register %s is already defined" % id)
 
-		reg = register(id)
+        reg = register(id)
 
-		alias_id = None
-		fields = []
+        alias_id = None
+        fields = []
 
-		for t in ts:
-			if t[0] == 'name':
-				name = t[1]
-				reg.name = name.strip()
-			elif t[0] == 'width':
-				reg.width = int(t[1])
-			elif t[0] == 'field':
-				f = bitfield.parse_bitfield(t[1], reg)
-				if f is None:
-					raise ConfigurationError(file,
-						"Invalid field in %s" % id)
-				fields.append(f)
-			elif t[0] == 'value':
-				if len(fields) == 0:
-					raise ConfigurationError(file,
-						"No field for value in %s" % id)
-				v = bitfield.parse_value(t[1])
-				if v is None:
-					raise ConfigurationError(file,
-						"Invalid value in %s" % id)
+        for t in ts:
+            if t[0] == 'name':
+                name = t[1]
+                reg.name = name.strip()
+            elif t[0] == 'width':
+                reg.width = int(t[1])
+            elif t[0] == 'field':
+                f = bitfield.parse_bitfield(t[1], reg)
+                if f is None:
+                    raise ConfigurationError(file,
+                                             "Invalid field in %s" % id)
+                fields.append(f)
+            elif t[0] == 'value':
+                if len(fields) == 0:
+                    raise ConfigurationError(file,
+                                             "No field for value in %s" % id)
+                v = bitfield.parse_value(t[1])
+                if v is None:
+                    raise ConfigurationError(file,
+                                             "Invalid value in %s" % id)
 
-				fields[-1].add_value(v[0], v[1])
-			elif t[0] == 'order':
-				if len(fields) != 0:
-					raise ConfigurationError(file,
-						("bit order defined after " \
-						+ "fields in %s") % id)
+                fields[-1].add_value(v[0], v[1])
+            elif t[0] == 'order':
+                if len(fields) != 0:
+                    raise ConfigurationError(file,
+                                             ("bit order defined after "
+                                              + "fields in %s") % id)
 
-				order_str = t[1].strip().lower()
-				order_str = order_str.replace(' ', '-')
+                order_str = t[1].strip().lower()
+                order_str = order_str.replace(' ', '-')
 
-				if order_str not in order_map:
-					raise ConfigurationError(file,
-						"Invalid bit order %s in %s" % \
-						(order_str, id))
-				reg.bit_order = order_map[order_str]
+                if order_str not in order_map:
+                    raise ConfigurationError(file,
+                                             "Invalid bit order %s in %s" %
+                                             (order_str, id))
+                reg.bit_order = order_map[order_str]
 
-			elif t[0] == 'alias':
-				alias_id = t[1].strip()
+            elif t[0] == 'alias':
+                alias_id = t[1].strip()
 
-		if alias_id is not None:
-			if reg.name is not None or fields != []:
-				raise ConfigurationError(file, ("Definiton " \
-					+ "for %s is an alias, but has other " \
-					+ "attributes") % id)
+        if alias_id is not None:
+            if reg.name is not None or fields != []:
+                raise ConfigurationError(file, ("Definiton "
+                                                +
+                                                "for %s is an alias, but has other "
+                                                + "attributes") % id)
 
-			if alias_id not in regs:
-				raise ConfigurationError(file, "Aliasing "
-					"non-existent register %s (from %s)" \
-					% (alias_id, id))
+            if alias_id not in regs:
+                raise ConfigurationError(file, "Aliasing "
+                                         "non-existent register %s (from %s)"
+                                         % (alias_id, id))
 
-			reg = regs[alias_id]
-			continue
+            reg = regs[alias_id]
+            continue
 
-		if reg.name is None or reg.name == '':
-			raise ConfigurationError(file,
-				"No name for entry %s" % id)
+        if reg.name is None or reg.name == '':
+            raise ConfigurationError(file,
+                                     "No name for entry %s" % id)
 
-		if len(fields) == 0:
-			raise ConfigurationError(file,
-				"Register %s has no fields" % id)
+        if len(fields) == 0:
+            raise ConfigurationError(file,
+                                     "Register %s has no fields" % id)
 
-		for f in fields:
-			reg.add_field(f)
+        for f in fields:
+            reg.add_field(f)
 
-		regs[id] = reg
+        regs[id] = reg
+
 
 def parse_config_dir(dirname, fnames, bnf, regs):
-	for fname in fnames:
-		print(fname)
-		full_fname = os.path.join(dirname, fname)
+    for fname in fnames:
+        print(fname)
+        full_fname = os.path.join(dirname, fname)
 
-		if os.path.isdir(full_fname):
-			continue
+        if os.path.isdir(full_fname):
+            continue
 
-		if fname.endswith('.conf'):
-			parse_config(bnf, regs, full_fname)
+        if fname.endswith('.conf'):
+            parse_config(bnf, regs, full_fname)
+
 
 def parse_all_configs(configs):
-	regs = {}
+    regs = {}
 
-	# set up the bnf to be used for each file
-	lbrack = Literal("[").suppress()
-	rbrack = Literal("]").suppress()
-	colon  = Literal(":").suppress()
-	semi   = Literal(";")
+    # set up the bnf to be used for each file
+    lbrack = Literal("[").suppress()
+    rbrack = Literal("]").suppress()
+    colon = Literal(":").suppress()
+    semi = Literal(";")
 
-	comment = semi + Optional(restOfLine)
+    comment = semi + Optional(restOfLine)
 
-	nonrbrack = "".join([c for c in printables if c != "]"]) + " \t"
-	noncolon  = "".join([c for c in printables if c != ":"]) + " \t"
+    nonrbrack = "".join([c for c in printables if c != "]"]) + " \t"
+    noncolon = "".join([c for c in printables if c != ":"]) + " \t"
 
-	sectionDef = lbrack + Word(nonrbrack) + rbrack
-	keyDef = ~lbrack + Word(noncolon) + colon + restOfLine
+    sectionDef = lbrack + Word(nonrbrack) + rbrack
+    keyDef = ~lbrack + Word(noncolon) + colon + restOfLine
 
-	bnf = Dict(ZeroOrMore(Group(sectionDef + ZeroOrMore(Group(keyDef)))))
-	bnf.ignore(comment)
+    bnf = Dict(ZeroOrMore(Group(sectionDef + ZeroOrMore(Group(keyDef)))))
+    bnf.ignore(comment)
 
-	for conf in configs:
-		if not os.path.exists(conf):
-			continue
-		if os.path.isdir(conf):
-			for dirpath, dirnames, filenames in os.walk(conf):
-				parse_config_dir(dirpath, filenames, bnf, regs)
-		else:
-			parse_config(bnf, regs, conf)
-	return regs
+    for conf in configs:
+        if not os.path.exists(conf):
+            continue
+        if os.path.isdir(conf):
+            for dirpath, dirnames, filenames in os.walk(conf):
+                parse_config_dir(dirpath, filenames, bnf, regs)
+        else:
+            parse_config(bnf, regs, conf)
+    return regs
+
 
 def usage(prog):
-	print("Usage: %s <-l> | <-s pattern> | [-n] register [value...]" % prog)
+    print("Usage: %s <-l> | <-s pattern> | [-n] register [value...]" % prog)
+
 
 def decode_value(reg, value, options):
-	try:
-		i = int(value, 0)
-	except ValueError as e:
-		print("error: invalid value '%s'" % value)
-		return
+    try:
+        i = int(value, 0)
+    except ValueError as e:
+        print("error: invalid value '%s'" % value)
+        return
 
-	if i > ((1 << reg.width) - 1):
-		print(("error: value '%s' is too large " + \
-			"for %d-bit register '%s'") % (value, reg.width, reg.id))
-		return
+    if i > ((1 << reg.width) - 1):
+        print(("error: value '%s' is too large " +
+               "for %d-bit register '%s'") % (value, reg.width, reg.id))
+        return
 
-	print(reg.decode(i, options['non-zero']))
+    print(reg.decode(i, options['non-zero']))
 
 
 def main():
-	try:
-		(opts, args) = getopt(sys.argv[1:], "hlns:", \
-			["help", "list", "non-zero", "search="])
-	except GetoptError:
-		usage(sys.argv[0])
-		return 1
+    try:
+        (opts, args) = getopt(sys.argv[1:], "hlns:",
+                              ["help", "list", "non-zero", "search="])
+    except GetoptError:
+        usage(sys.argv[0])
+        return 1
 
-	try:
-		regs = parse_all_configs(configs)
-	except ConfigurationError as e:
-		print("Error parsing configuration file %s:\n\t%s" % \
-			(e.file, e.message))
-		return 1
+    try:
+        regs = parse_all_configs(configs)
+    except ConfigurationError as e:
+        print("Error parsing configuration file %s:\n\t%s" %
+              (e.file, e.message))
+        return 1
 
-	if regs == {}:
-		print("No configuration available")
-		return 1
+    if regs == {}:
+        print("No configuration available")
+        return 1
 
-	options = {}
-	options['non-zero'] = False
+    options = {}
+    options['non-zero'] = False
 
-	for o, a in opts:
-		if o in ("-h", "--help"):
-			usage(sys.argv[0])
-			return
+    for o, a in opts:
+        if o in ("-h", "--help"):
+            usage(sys.argv[0])
+            return
 
-		if o in ("-l", "--list"):
-			list_regs(regs)
-			return
+        if o in ("-l", "--list"):
+            list_regs(regs)
+            return
 
-		if o in ("-s", "--search"):
-			list_regs(search_regs(regs, a))
-			return
+        if o in ("-s", "--search"):
+            list_regs(search_regs(regs, a))
+            return
 
-		if o in ("-n", "--non-zero"):
-			options['non-zero'] = True
+        if o in ("-n", "--non-zero"):
+            options['non-zero'] = True
 
-	if not args:
-		usage(sys.argv[0])
-		return 1
+    if not args:
+        usage(sys.argv[0])
+        return 1
 
-	reg_id = args.pop(0)
-	if reg_id not in regs:
-		print("No such register '%s'" % reg_id)
-		return 1
+    reg_id = args.pop(0)
+    if reg_id not in regs:
+        print("No such register '%s'" % reg_id)
+        return 1
 
-	reg = regs[reg_id]
-	print("decoding as %s" % reg.name)
+    reg = regs[reg_id]
+    print("decoding as %s" % reg.name)
 
-	if args:
-		value_iter = args.__iter__()
-	else:
-		value_iter = iter(sys.stdin.readline, '')
+    if args:
+        value_iter = args.__iter__()
+    else:
+        value_iter = iter(sys.stdin.readline, '')
 
-	try:
-		for value in value_iter:
-			decode_value(reg, value.strip(), options)
-	except KeyboardInterrupt as e:
-		pass
+    try:
+        for value in value_iter:
+            decode_value(reg, value.strip(), options)
+    except KeyboardInterrupt as e:
+        pass
 
-	return 0
+    return 0
 
 if __name__ == "__main__":
-	sys.exit(main())
+    sys.exit(main())
