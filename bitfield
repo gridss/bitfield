@@ -242,10 +242,10 @@ def parse_config(bnf, regs, file):
 
 		regs[id] = reg
 
-def parse_config_dir(data, dir, fnames):
-	(bnf, regs) = data
+def parse_config_dir(dirname, fnames, bnf, regs):
 	for fname in fnames:
-		full_fname = os.path.join(dir, fname)
+		print(fname)
+		full_fname = os.path.join(dirname, fname)
 
 		if os.path.isdir(full_fname):
 			continue
@@ -273,14 +273,12 @@ def parse_all_configs(configs):
 	bnf = Dict(ZeroOrMore(Group(sectionDef + ZeroOrMore(Group(keyDef)))))
 	bnf.ignore(comment)
 
-	# bundle into a single var that can be passed to os.path.walk
-	conf_data = (bnf, regs)
-
 	for conf in configs:
 		if not os.path.exists(conf):
 			continue
 		if os.path.isdir(conf):
-			os.path.walk(conf, parse_config_dir, conf_data)
+			for dirpath, dirnames, filenames in os.walk(conf):
+				parse_config_dir(dirpath, filenames, bnf, regs)
 		else:
 			parse_config(bnf, regs, conf)
 	return regs
