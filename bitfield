@@ -8,9 +8,8 @@
 
 import os
 import sys
-import pprint
 from pyparsing import Literal, Word, ZeroOrMore, Group, Dict, Optional, \
-    printables, ParseException, restOfLine
+    printables, restOfLine
 from getopt import getopt, GetoptError
 
 # List of paths to look for configuration files. If a directory is specified,
@@ -223,10 +222,8 @@ def parse_config(bnf, regs, file):
 
         if alias_id is not None:
             if reg.name is not None or fields != []:
-                raise ConfigurationError(file, ("Definiton "
-                                                +
-                                                "for %s is an alias, but has other "
-                                                + "attributes") % id)
+                s = "Definiton for %s is an alias, but has other attributes"
+                raise ConfigurationError(file, s % id)
 
             if alias_id not in regs:
                 raise ConfigurationError(file, "Aliasing "
@@ -300,7 +297,7 @@ def usage(prog):
 def decode_value(reg, value, options):
     try:
         i = int(value, 0)
-    except ValueError as e:
+    except ValueError:
         print("error: invalid value '%s'" % value)
         return
 
